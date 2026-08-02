@@ -1,0 +1,29 @@
+name: Apply four compiler fixes
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'patches/four-fixes.patch'
+      - '.github/workflows/apply-fixes.yml'
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply patch
+        run: |
+          patch -p1 < patches/four-fixes.patch
+          grep -c "Flexible clause\|elementarySize\|YYYYMMDD" src/parser.cpp src/code_generator.h
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/parser.cpp src/code_generator.h
+          git status
+          git commit -m "Apply four compiler fixes: DATE/TIME, EVALUATE, REDEFINES, READ RECORD KEY IS" || exit 0
+          git push
