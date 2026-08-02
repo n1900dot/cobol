@@ -1,0 +1,12 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. INVALID-PIC.
+       
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-NUMBER PIC 9(ABC).
+       
+       PROCEDURE DIVISION.
+       MAIN-PROCEDURE.
+           MOVE 100 TO WS-NUMBER.
+           DISPLAY WS-NUMBER.
+           STOP RUN.

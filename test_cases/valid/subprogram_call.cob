@@ -1,0 +1,19 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SUBPROGRAM-MAIN.
+       
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-NUMBER PIC 9(5) VALUE 100.
+       01 WS-RESULT PIC 9(7).
+       
+       PROCEDURE DIVISION.
+       MAIN-PROCEDURE.
+           DISPLAY "BEFORE CALL: " WS-NUMBER.
+           PERFORM SUB-ROUTINE.
+           DISPLAY "AFTER CALL: " WS-NUMBER.
+           STOP RUN.
+       
+       SUB-ROUTINE.
+           COMPUTE WS-RESULT = WS-NUMBER * 2.
+           DISPLAY "RESULT IN SUB: " WS-RESULT.
+           EXIT.
