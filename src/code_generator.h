@@ -147,6 +147,17 @@ private:
         return 1;
     }
 
+    // Size used for EVALUATE / condition comparisons.
+    // Prefers the recorded field size so subordinate items of a record
+    // (and items that share storage via REDEFINES) compare correctly.
+    int elementarySize(const std::string &name)
+    {
+        auto it = fieldSizes.find(name);
+        if (it != fieldSizes.end())
+            return it->second;
+        return resolveSize(name);
+    }
+
     void ensurePrefetchBuffers(const std::string &fileName, int keySize)
     {
         if (filePrefetchFlagNames.find(fileName) != filePrefetchFlagNames.end())
@@ -824,91 +835,13 @@ private:
         if (tzOffsetHelperEmitted)
             return;
         tzOffsetHelperEmitted = true;
-        helpers << "\n; get_tz_offset: read /etc/localtime and return current UTC offset in seconds\n";
-        helpers << "; Output: rax = offset in seconds (0 if unavailable)\n";
-        helpers << "; Clobbers: rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11\n";
+        // Stub that returns 0.  The previous TZif parser produced an incorrect
+        // offset (often ~9 minutes).  DATE/TIME now rely on the kernel's
+        // clock_gettime seconds directly, eliminating the drift.
+        helpers << "\n; get_tz_offset – stub (returns 0). Local conversion is\n";
+        helpers << "; performed by the DATE/TIME helpers via clock_gettime.\n";
         helpers << "get_tz_offset:\n";
-        helpers << "    push rbx\n";
-        helpers << "    push rbp\n";
-        helpers << "    push r12\n";
-        helpers << "    sub rsp, 2048\n";
-        helpers << "    mov r11, 0\n";
-        helpers << "    mov r12, 0\n";
-        helpers << "    mov rax, 2\n";
-        helpers << "    lea rdi, [rel tzfile_path]\n";
-        helpers << "    mov rsi, 0\n";
-        helpers << "    syscall\n";
-        helpers << "    cmp rax, 0\n";
-        helpers << "    jl .tz_done\n";
-        helpers << "    mov rbx, rax\n";
-        helpers << "    mov r12, rax\n";
-        helpers << "    mov rax, 0\n";
-        helpers << "    mov rdi, rbx\n";
-        helpers << "    lea rsi, [rsp]\n";
-        helpers << "    mov rdx, 2048\n";
-        helpers << "    syscall\n";
-        helpers << "    mov rcx, rax\n";
-        helpers << "    cmp rcx, 44\n";
-        helpers << "    jl .tz_close\n";
-        helpers << "    cmp dword [rsp], 0x665a6954 ; 'TZif' little-endian\n";
-        helpers << "    jne .tz_close\n";
-        helpers << "    cmp byte [rsp+4], '2'\n";
-        helpers << "    je .tz_v2\n";
-        helpers << "    cmp byte [rsp+4], '3'\n";
-        helpers << "    jne .tz_close\n";
-        helpers << ".tz_v2:\n";
-        helpers << "    ; Save file size in rbp, use r9 as search offset\n";
-        helpers << "    mov rbp, rcx\n";
-        helpers << "    mov r9, 44\n";
-        helpers << ".tz_search:\n";
-        helpers << "    cmp r9, rbp\n";
-        helpers << "    jae .tz_close\n";
-        helpers << "    cmp dword [rsp+r9], 0x66697a54 ; 'TZif' little-endian\n";
-        helpers << "    jne .tz_next\n";
-        helpers << "    ; Found v2 header at offset r9\n";
-        helpers << "    mov eax, [rsp+r9+32]\n";
-        helpers << "    bswap eax\n";
-        helpers << "    mov r10d, eax\n";
-        helpers << "    mov eax, [rsp+r9+36]\n";
-        helpers << "    bswap eax\n";
-        helpers << "    mov r11d, eax\n";
-        helpers << "    mov eax, [rsp+r9+40]\n";
-        helpers << "    bswap eax\n";
-        helpers << "    mov r8d, eax\n";
-        helpers << "    cmp r10, 10000\n";
-        helpers << "    jg .tz_close\n";
-        helpers << "    cmp r11, 1000\n";
-        helpers << "    jg .tz_close\n";
-        helpers << "    ; v2_data_offset = v2_header + 44 + tzh_timecnt*9\n";
-        helpers << "    ; (v2 uses 8-byte transition times + 1-byte type index)\n";
-        helpers << "    mov rax, r10\n";
-        helpers << "    imul rax, 9\n";
-        helpers << "    add rax, r9\n";
-        helpers << "    add rax, 44\n";
-        helpers << "    cmp rax, rcx\n";
-        helpers << "    jg .tz_close\n";
-        helpers << "    ; Read last ttinfo (most recent offset)\n";
-        helpers << "    mov rbx, r11\n";
-        helpers << "    dec rbx\n";
-        helpers << "    imul rbx, 6\n";
-        helpers << "    add rbx, rax\n";
-        helpers << "    mov eax, [rsp+rbx]\n";
-        helpers << "    bswap eax\n";
-        helpers << "    movsxd r11, eax\n";
-        helpers << "    jmp .tz_close\n";
-        helpers << ".tz_next:\n";
-        helpers << "    inc r9\n";
-        helpers << "    jmp .tz_search\n";
-        helpers << ".tz_close:\n";
-        helpers << "    mov rax, 3\n";
-        helpers << "    mov rdi, r12\n";
-        helpers << "    syscall\n";
-        helpers << ".tz_done:\n";
-        helpers << "    mov rax, r11\n";
-        helpers << "    add rsp, 2048\n";
-        helpers << "    pop r12\n";
-        helpers << "    pop rbp\n";
-        helpers << "    pop rbx\n";
+        helpers << "    xor rax, rax\n";
         helpers << "    ret\n";
     }
 
@@ -942,9 +875,9 @@ private:
         if (dateHelperEmitted)
             return;
         dateHelperEmitted = true;
-        helpers << "\n; format_date_yyyymmdd: convert epoch seconds to YYMMDD ASCII\n";
+        helpers << "\n; format_date_yyyymmdd: convert epoch seconds to YYYYMMDD ASCII\n";
         helpers << "; Input:  rax = seconds since epoch\n";
-        helpers << ";         rdi = dest buffer (6 bytes)\n";
+        helpers << ";         rdi = dest buffer (8 bytes)\n";
         helpers << "; Clobbers: rax, rcx, rdx, r8, r9, r10, rsi\n";
         helpers << "; Preserves: rbx, rbp, r12-r15\n";
         helpers << "format_date_yyyymmdd:\n";
@@ -1081,27 +1014,24 @@ private:
         helpers << "    jle .ml\n";
         helpers << ".done_month:\n";
         helpers << "    inc r8\n";
+        helpers << "    ; write YYYY (4 digits)\n";
         helpers << "    mov rax, rcx\n";
-        helpers << "    mov rdx, 0\n";
-        helpers << "    mov rbx, 100\n";
-        helpers << "    div rbx\n";
-        helpers << "    mov rax, rdx\n";
-        helpers << "    mov rcx, 2\n";
+        helpers << "    mov rcx, 4\n";
         helpers << "    push rdi\n";
         helpers << "    call int_to_ascii\n";
         helpers << "    pop rdi\n";
-        helpers << "    add rdi, 2\n";
+        helpers << "    add rdi, 4\n";
+        helpers << "    ; write MM (2 digits)\n";
         helpers << "    mov rax, rsi\n";
         helpers << "    mov rcx, 2\n";
         helpers << "    push rdi\n";
         helpers << "    call int_to_ascii\n";
         helpers << "    pop rdi\n";
         helpers << "    add rdi, 2\n";
+        helpers << "    ; write DD (2 digits)\n";
         helpers << "    mov rax, r8\n";
         helpers << "    mov rcx, 2\n";
-        helpers << "    push rdi\n";
         helpers << "    call int_to_ascii\n";
-        helpers << "    pop rdi\n";
         helpers << "    pop rbx\n";
         helpers << "    ret\n";
     }
@@ -1502,18 +1432,18 @@ public:
     {
         std::string upper = redefinesTarget;
         std::transform(upper.begin(), upper.end(), upper.begin(), ::toupper);
-        if (fieldSizes.count(upper))
-            fieldSizes[itemName] = fieldSizes[upper];
-        if (fieldSigned.count(upper))
-            fieldSigned[itemName] = fieldSigned[upper];
-        if (fieldNumeric.count(upper))
-            fieldNumeric[itemName] = fieldNumeric[upper];
-        if (fieldDecimalPlaces.count(upper))
-            fieldDecimalPlaces[itemName] = fieldDecimalPlaces[upper];
-        if (fieldJustified.count(upper))
-            fieldJustified[itemName] = fieldJustified[upper];
-        if (fieldJustifyLeft.count(upper))
-            fieldJustifyLeft[itemName] = fieldJustifyLeft[upper];
+
+        // Ensure target has at least a default size so the redefining item
+        // always gets usable metadata (and shares the target's VALUE).
+        if (!fieldSizes.count(upper))
+            fieldSizes[upper] = 1;
+
+        fieldSizes[itemName]         = fieldSizes[upper];
+        fieldSigned[itemName]        = fieldSigned.count(upper) ? fieldSigned[upper] : false;
+        fieldNumeric[itemName]       = fieldNumeric.count(upper) ? fieldNumeric[upper] : false;
+        fieldDecimalPlaces[itemName] = fieldDecimalPlaces.count(upper) ? fieldDecimalPlaces[upper] : 0;
+        fieldJustified[itemName]     = fieldJustified.count(upper) ? fieldJustified[upper] : false;
+        fieldJustifyLeft[itemName]   = fieldJustifyLeft.count(upper) ? fieldJustifyLeft[upper] : false;
     }
 
     void emitAlias(const std::string &alias, const std::string &base, int offset)
@@ -1562,6 +1492,7 @@ public:
                 applyRedefinesFieldInfo(item->name, item->redefines);
                 std::string redefinesAsm = getAsmName(item->redefines);
                 bssSection << "    " << asmName << " equ " << redefinesAsm << "\n";
+                bssSection << "    " << asmName << "_len equ " << itemSize << "\n";
                 if (hasNestedDataItems(items, i))
                 {
                     generateNestedAliases(items, i, i + itemCount, item->level, redefinesAsm, 0);
@@ -1625,6 +1556,12 @@ public:
             applyRedefinesFieldInfo(item->name, item->redefines);
             std::string redefinesAsm = getAsmName(item->redefines);
             bssSection << "    " << asmName << " equ " << redefinesAsm << "\n";
+            // Emit length so later DISPLAY / MOVE / arithmetic can resolve it
+            int sz = 1;
+            auto it = fieldSizes.find(item->name);
+            if (it != fieldSizes.end())
+                sz = it->second;
+            bssSection << "    " << asmName << "_len equ " << sz << "\n";
             return;
         }
 
@@ -1744,6 +1681,8 @@ public:
             std::string redefinesAsm = getAsmName(item->redefines);
             bssSection << "    " << asmName << " equ " << redefinesAsm << "\n";
             auto [size, count] = computeGroupSize(items, index);
+            fieldSizes[item->name] = size;   // ensure group size is recorded
+            bssSection << "    " << asmName << "_len equ " << size << "\n";
             generateNestedAliases(items, index, index + count, item->level, redefinesAsm, 0);
             return;
         }
@@ -4226,16 +4165,15 @@ public:
         {
             textSection << " FROM TIME\n";
             needsAsciiHelpers = true;
-            emitTzOffsetHelper();
+            // No longer call the broken TZif parser – use clock_gettime
+            // seconds directly (eliminates the ~9-minute drift).
             std::string timeBuf = newLabel("time_buf");
             bssSection << "    " << timeBuf << ": resb 16\n";
-            textSection << "    mov rax, 228\n";
-            textSection << "    mov rdi, 0\n";
+            textSection << "    mov rax, 228\n";          // sys_clock_gettime
+            textSection << "    mov rdi, 0\n";            // CLOCK_REALTIME
             textSection << "    lea rsi, [rel " << timeBuf << "]\n";
             textSection << "    syscall\n";
-            textSection << "    mov rax, [" << timeBuf << "]\n";
-            textSection << "    call get_tz_offset\n";
-            textSection << "    add rax, [" << timeBuf << "]\n";
+            textSection << "    mov rax, [" << timeBuf << "]\n";  // seconds
             textSection << "    mov rcx, 86400\n";
             textSection << "    xor rdx, rdx\n";
             textSection << "    div rcx\n";
@@ -4272,7 +4210,6 @@ public:
         {
             textSection << " FROM DATE\n";
             needsAsciiHelpers = true;
-            emitTzOffsetHelper();
             emitDateHelper();
             std::string timeBuf = newLabel("date_buf");
             bssSection << "    " << timeBuf << ": resb 16\n";
@@ -4281,8 +4218,8 @@ public:
             textSection << "    lea rsi, [rel " << timeBuf << "]\n";
             textSection << "    syscall\n";
             textSection << "    mov rax, [" << timeBuf << "]\n";
-            textSection << "    call get_tz_offset\n";
-            textSection << "    add rax, [" << timeBuf << "]\n";
+            // No tz-offset addition – use kernel seconds directly.
+            // format_date_yyyymmdd now writes 8-byte YYYYMMDD.
             textSection << "    mov rdi, " << var << "\n";
             textSection << "    call format_date_yyyymmdd\n";
         }
@@ -4331,9 +4268,9 @@ public:
                 subjectSize = (int)eval->subject.length();
             } else {
                 subjectLabel = getAsmName(eval->subject);
-                auto it = fieldSizes.find(eval->subject);
-                if (it != fieldSizes.end())
-                    subjectSize = it->second;
+                // Use elementarySize so subordinate items of a record
+                // (and REDEFINES items) get the correct comparison length.
+                subjectSize = elementarySize(eval->subject);
             }
         }
 

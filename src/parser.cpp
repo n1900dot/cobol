@@ -1018,6 +1018,7 @@ std::unique_ptr<ASTNode> Parser::parseRead() {
     auto node = std::make_unique<ReadNode>();
     advance(); // READ
     skipNewlines();
+
     // Accept either "READ <file> [NEXT RECORD]" or "READ NEXT RECORD <file>"
     if (check(TokenType::NEXT)) {
       // form: READ NEXT RECORD <file>
@@ -1032,53 +1033,63 @@ std::unique_ptr<ASTNode> Parser::parseRead() {
                      node->fileName.begin(), ::toupper);
       skipNewlines();
     } else {
-      // form: READ <file> [NEXT RECORD]
+      // form: READ <file>
       node->fileName = advance().lexeme;
       std::transform(node->fileName.begin(), node->fileName.end(),
                      node->fileName.begin(), ::toupper);
       skipNewlines();
+    }
 
-      // Optional NEXT RECORD after file name
-      if (consume(TokenType::NEXT)) {
+    // Flexible clause loop – order-independent INTO / NEXT RECORD / KEY IS / RECORD KEY IS
+    while (true) {
+      skipNewlines();
+
+      // NEXT RECORD
+      if (!node->nextRecord && consume(TokenType::NEXT)) {
         skipNewlines();
         consume(TokenType::RECORD);
         node->nextRecord = true;
-        skipNewlines();
+        continue;
       }
-    }
 
-    if (consume(TokenType::INTO)) {
-      skipNewlines();
-      node->intoVar = advance().lexeme;
-      std::transform(node->intoVar.begin(), node->intoVar.end(),
-                     node->intoVar.begin(), ::toupper);
-      skipNewlines();
-    }
-
-    // Allow NEXT RECORD to appear after INTO as well: READ <file> INTO <var>
-    // NEXT RECORD
-    if (!node->nextRecord && consume(TokenType::NEXT)) {
-      skipNewlines();
-      consume(TokenType::RECORD);
-      node->nextRecord = true;
-      skipNewlines();
-    }
-
-    // Optional KEY IS clause for indexed/relative file reads
-    if (consume(TokenType::KEY)) {
-      skipNewlines();
-      if (consume(TokenType::IS))
+      // INTO identifier
+      if (consume(TokenType::INTO)) {
         skipNewlines();
-      if (check(TokenType::IDENTIFIER)) {
+        if (!check(TokenType::IDENTIFIER)) {
+          throw std::runtime_error(
+              "Expected identifier after INTO in READ at line " +
+              std::to_string(peek().line));
+        }
+        node->intoVar = advance().lexeme;
+        std::transform(node->intoVar.begin(), node->intoVar.end(),
+                       node->intoVar.begin(), ::toupper);
+        continue;
+      }
+
+      // RECORD KEY IS  or  KEY IS
+      if (check(TokenType::RECORD) || check(TokenType::KEY)) {
+        if (check(TokenType::RECORD)) {
+          advance(); // RECORD
+          skipNewlines();
+          expect(TokenType::KEY, "KEY");
+        } else {
+          advance(); // KEY
+        }
+        skipNewlines();
+        if (consume(TokenType::IS))
+          skipNewlines();
+        if (!check(TokenType::IDENTIFIER)) {
+          throw std::runtime_error(
+              "Expected identifier after KEY IS in READ at line " +
+              std::to_string(peek().line));
+        }
         node->keyVar = advance().lexeme;
         std::transform(node->keyVar.begin(), node->keyVar.end(),
                        node->keyVar.begin(), ::toupper);
-        skipNewlines();
-      } else {
-        throw std::runtime_error(
-            "Expected identifier after KEY IS in READ at line " +
-            std::to_string(peek().line));
+        continue;
       }
+
+      break; // no more recognised clauses
     }
 
     // Parse AT END, NOT AT END, INVALID KEY, NOT INVALID KEY clauses
