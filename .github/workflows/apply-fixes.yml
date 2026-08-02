@@ -1,0 +1,29 @@
+name: Apply compiler fixes
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.fix-payload/**'
+      - '.github/workflows/apply-fixes.yml'
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Reconstruct fixed sources
+        run: |
+          chmod +x .fix-payload/reconstruct.sh
+          .fix-payload/reconstruct.sh
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/parser.cpp src/code_generator.h
+          git status
+          git commit -m "Apply four compiler fixes: DATE/TIME, EVALUATE, REDEFINES, READ RECORD KEY IS" || exit 0
+          git push
